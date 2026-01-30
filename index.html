@@ -51,4 +51,697 @@ canvas { display:block; }
   animation:pulse 2s infinite; display:none;
 }
 @keyframes pulse { 0%,100%{transform:translateX(-50%) scale(1);} 50%{transform:translateX(-50%) scale(1.05);} }
-.cta-btn.show { display:block;
+.cta-btn.show { display:block; }
+</style>
+</head>
+<body>
+
+<div id="gameContainer">
+  <canvas id="gameCanvas" width="720" height="1280"></canvas>
+  <div class="ui-layer">
+    <div class="hint-box" id="hint">点击瓶子选择，倒水到同色</div>
+    <button class="cta-btn" id="cta" onclick="download()">🧧 领红包下载</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const width = 720, height = 1280;
+
+// 颜色配置（更鲜艳的配色）
+const COLORS = [
+  { name:'red', main:'#ff4757', light:'#ff6b81', dark:'#c44569', glow:'rgba(255,71,87,0.6)' },
+  { name:'blue', main:'#3742fa', light:'#5352ed', dark:'#2f3542', glow:'rgba(55,66,250,0.6)' },
+  { name:'green', main:'#2ed573', light:'#7bed9f', dark:'#218c74', glow:'rgba(46,213,115,0.6)' }
+];
+
+// 工具函数：绘制圆角矩形
+function drawRoundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y); ctx.arcTo(x+w, y, x+w, y+r, r);
+  ctx.lineTo(x+w, y+h-r); ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
+  ctx.lineTo(x+r, y+h); ctx.arcTo(x, y+h, x, y+h-r, r);
+  ctx.lineTo(x, y+r); ctx.arcTo(x, y, x+r, y, r);
+  ctx.closePath();
+}
+
+// ================= 瓶子类（精修版） =================
+class Bottle {
+  constructor(x, y, id, colors = []) {
+    this.x = x; this.y = y; this.id = id;
+    this.width = 100; this.height = 220;
+    this.colors = colors; // 从底到上
+    this.selected = false;
+    this.corked = false;
+    this.liquidY = 0; // 液面波动偏移
+    this.targetLiquidY = 0;
+  }
+
+  draw(ctx) {
+    const { x, y, w, h } = { x:this.x, y:this.y, w:this.width, h:this.height };
+    const cx = x + w/2;
+    
+    // 先绘制液体（在玻璃后面）
+    this.drawLiquid(ctx);
+    
+    // 绘制玻璃瓶身（透明效果）
+    ctx.save();
+    
+    // 瓶身外轮廓（用于裁剪和描边）
+    drawRoundRect(ctx, x, y, w, h, 15);
+    
+    // 玻璃瓶填充（极淡的青色透明）
+    ctx.fillStyle = 'rgba(200,230,255,0.08)';
+    ctx.fill();
+    
+    // 玻璃边框（内发光效果）
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    
+    // 选中状态外发光
+    if(this.selected) {
+      ctx.shadowBlur = 30;
+      ctx.shadowColor = 'rgba(255,215,0,0.8)';
+      ctx.strokeStyle = '#ffd700';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    
+    // 左侧高光（玻璃反光）
+    ctx.beginPath();
+    ctx.moveTo(x+15, y+30);
+    ctx.lineTo(x+15, y+h-40);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    
+    // 右侧次高光
+    ctx.beginPath();
+    ctx.moveTo(x+w-12, y+40);
+    ctx.lineTo(x+w-12, y+h-50);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.stroke();
+    
+    // 瓶口边缘
+    ctx.beginPath();
+    ctx.ellipse(cx, y+8, 35, 10, 0, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(200,230,255,0.15)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    ctx.restore();
+    
+    // 绘制软木塞（如果满瓶）
+    if(this.corked || (this.colors.length === 4 && this.isUniform())) {
+      this.drawCork(ctx);
+    }
+  }
+
+  drawLiquid(ctx) {
+    if(this.colors.length === 0) return;
+    
+    const { x, y, width:w, height:h } = this;
+    const liquidHeight = (h - 40) / 4; // 每层高度
+    const bottomY = y + h - 20; // 液体底部
+    
+    // 更新液面波动
+    this.liquidY += (this.targetLiquidY - this.liquidY) * 0.1;
+    
+    ctx.save();
+    
+    // 裁剪到瓶身内部
+    drawRoundRect(ctx, x+5, y+20, w-10, h-30, 10);
+    ctx.clip();
+    
+    // 绘制每一层液体
+    this.colors.forEach((color, idx) => {
+      const baseY = bottomY - (idx + 1) * liquidHeight;
+      const waveHeight = Math.sin(Date.now() * 0.003 + idx * 0.5) * 3; // 波动
+      
+      // 液体渐变
+      const grad = ctx.createLinearGradient(x, baseY, x, baseY + liquidHeight);
+      grad.addColorStop(0, color.dark);
+      grad.addColorStop(0.3, color.main);
+      grad.addColorStop(1, color.light);
+      
+      ctx.fillStyle = grad;
+      
+      // 绘制液体块（带圆角和波浪顶面）
+      ctx.beginPath();
+      ctx.moveTo(x+5, baseY + 5);
+      
+      // 顶面波浪（只有最顶层有波动）
+      if(idx === this.colors.length - 1) {
+        for(let i=0; i<=10; i++) {
+          const px = x + 5 + (w-10) * (i/10);
+          const py = baseY + Math.sin(i * 0.5 + Date.now() * 0.005) * 2;
+          ctx.lineTo(px, py);
+        }
+      } else {
+        ctx.lineTo(x+w-5, baseY);
+      }
+      
+      ctx.lineTo(x+w-5, baseY + liquidHeight);
+      ctx.lineTo(x+5, baseY + liquidHeight);
+      ctx.closePath();
+      ctx.fill();
+      
+      // 液体表面高光（那层亮线）
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.beginPath();
+      if(idx === this.colors.length - 1) {
+        for(let i=0; i<=10; i++) {
+          const px = x + 5 + (w-10) * (i/10);
+          const py = baseY + Math.sin(i * 0.5 + Date.now() * 0.005) * 2;
+          ctx.lineTo(px, py + 3);
+        }
+      } else {
+        ctx.moveTo(x+5, baseY + 3);
+        ctx.lineTo(x+w-5, baseY + 3);
+      }
+      ctx.lineTo(x+w-5, baseY + 6);
+      ctx.lineTo(x+5, baseY + 6);
+      ctx.fill();
+      
+      // 层间分界线（淡淡的阴影）
+      if(idx > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.fillRect(x+5, baseY + liquidHeight - 2, w-10, 2);
+      }
+    });
+    
+    ctx.restore();
+  }
+
+  drawCork(ctx) {
+    const { x, y, width:w } = this;
+    const cx = x + w/2;
+    const cy = y - 5;
+    
+    // 软木塞主体（圆角矩形）
+    const corkW = 50, corkH = 35;
+    
+    // 木纹渐变
+    const grad = ctx.createLinearGradient(cx-corkW/2, cy, cx+corkW/2, cy);
+    grad.addColorStop(0, '#d4a574');
+    grad.addColorStop(0.5, '#e6b88a');
+    grad.addColorStop(1, '#c4915c');
+    
+    ctx.fillStyle = grad;
+    drawRoundRect(ctx, cx-corkW/2, cy, corkW, corkH, 8);
+    ctx.fill();
+    
+    // 软木塞顶面（椭圆，有厚度感）
+    ctx.fillStyle = '#e6b88a';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, corkW/2, 10, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = '#b8956a';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    
+    // 木纹线条（纹理细节）
+    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+    ctx.lineWidth = 1;
+    for(let i=-15; i<=15; i+=8) {
+      ctx.beginPath();
+      ctx.moveTo(cx+i, cy+5);
+      ctx.lineTo(cx+i+3, cy+corkH-5);
+      ctx.stroke();
+    }
+  }
+
+  isUniform() {
+    if(this.colors.length === 0) return false;
+    return this.colors.every(c => c.name === this.colors[0].name);
+  }
+
+  contains(mx, my) {
+    return mx > this.x && mx < this.x + this.width &&
+           my > this.y && my < this.y + this.height;
+  }
+}
+
+// ================= 倒水动画类（精修版） =================
+class PourAnimation {
+  constructor(fromBottle, toBottle, color) {
+    this.from = fromBottle;
+    this.to = toBottle;
+    this.color = color;
+    this.progress = 0;
+    this.particles = [];
+    this.active = true;
+    
+    // 计算坐标
+    this.x1 = fromBottle.x + fromBottle.width/2;
+    this.y1 = fromBottle.y + 15;
+    this.x2 = toBottle.x + toBottle.width/2;
+    this.y2 = toBottle.y + 15;
+  }
+
+  update() {
+    this.progress += 0.025;
+    
+    // 生成水滴粒子
+    if(this.progress < 0.8 && Math.random() > 0.4) {
+      const t = this.progress;
+      // 贝塞尔曲线插值
+      const cpX = (this.x1 + this.x2) / 2;
+      const cpY = Math.max(this.y1, this.y2) + 80;
+      const x = (1-t)*(1-t)*this.x1 + 2*(1-t)*t*cpX + t*t*this.x2;
+      const y = (1-t)*(1-t)*this.y1 + 2*(1-t)*t*cpY + t*t*this.y2;
+      
+      this.particles.push({
+        x, y: y + Math.random()*20,
+        vx: (Math.random()-0.5)*2,
+        vy: Math.random()*5 + 2,
+        size: 4 + Math.random()*6,
+        life: 1,
+        color: this.color
+      });
+    }
+    
+    // 更新粒子
+    this.particles.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.3; // 重力
+      p.life -= 0.03;
+    });
+    this.particles = this.particles.filter(p => p.life > 0);
+    
+    if(this.progress >= 1 && this.particles.length === 0) {
+      this.active = false;
+    }
+  }
+
+  draw(ctx) {
+    if(!this.active) return;
+    
+    const { x1, y1, x2, y2, color } = this;
+    const progress = Math.min(this.progress, 1);
+    
+    // 主水流（粗）
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    const cpX = (x1 + x2) / 2;
+    const cpY = Math.max(y1, y2) + 100;
+    
+    // 绘制到当前进度位置
+    const t = progress;
+    const curX = (1-t)*(1-t)*x1 + 2*(1-t)*t*cpX + t*t*x2;
+    const curY = (1-t)*(1-t)*y1 + 2*(1-t)*t*cpY + t*t*y2;
+    
+    ctx.quadraticCurveTo(cpX, cpY, curX, curY);
+    ctx.strokeStyle = color.main;
+    ctx.lineWidth = 12;
+    ctx.lineCap = 'round';
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = color.glow;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    
+    // 水流核心（亮）
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.quadraticCurveTo(cpX, cpY, curX, curY);
+    ctx.strokeStyle = color.light;
+    ctx.lineWidth = 6;
+    ctx.stroke();
+    
+    // 水滴粒子
+    this.particles.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+      ctx.fillStyle = p.color.main;
+      ctx.globalAlpha = p.life;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    
+    // 落入点涟漪
+    if(progress > 0.3 && progress < 0.9) {
+      ctx.beginPath();
+      ctx.ellipse(x2, y2, 20*(1-progress), 8*(1-progress), 0, 0, Math.PI*2);
+      ctx.strokeStyle = color.main;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+}
+
+// ================= 红包类 =================
+class RedPacket {
+  constructor(x, y, colorInfo) {
+    this.x = x; this.y = y;
+    this.color = colorInfo;
+    this.collected = false;
+    this.scale = 1;
+    this.openProgress = 0;
+  }
+
+  draw(ctx) {
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.scale(this.scale, this.scale);
+    
+    // 红包主体（圆角矩形）
+    const w = 90, h = 110;
+    
+    // 如果是已收集状态，变灰
+    if(this.collected) {
+      ctx.filter = 'grayscale(0.8) brightness(0.7)';
+    } else {
+      // 等待状态的发光
+      ctx.shadowBlur = 20 + Math.sin(Date.now()*0.005)*10;
+      ctx.shadowColor = 'gold';
+    }
+    
+    // 红包红色渐变
+    const grad = ctx.createLinearGradient(0, -h/2, 0, h/2);
+    grad.addColorStop(0, '#ff6b6b');
+    grad.addColorStop(1, '#ee5a6f');
+    ctx.fillStyle = grad;
+    drawRoundRect(ctx, -w/2, -h/2, w, h, 12);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    
+    // 上部盖子（稍深）
+    ctx.fillStyle = '#e54848';
+    ctx.beginPath();
+    ctx.moveTo(-w/2, -h/2);
+    ctx.lineTo(w/2, -h/2);
+    ctx.lineTo(w/2, -h/2 + 35);
+    ctx.bezierCurveTo(w/4, -h/2 + 25, -w/4, -h/2 + 25, -w/2, -h/2 + 35);
+    ctx.closePath();
+    ctx.fill();
+    
+    // 金色圆圈
+    ctx.fillStyle = '#ffd700';
+    ctx.beginPath();
+    ctx.arc(0, 5, 22, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffb700';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    // ¥符号
+    ctx.fillStyle = '#ee5a6f';
+    ctx.font = 'bold 24px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('¥', 0, 5);
+    
+    // 已收集印章效果
+    if(this.collected) {
+      ctx.strokeStyle = 'rgba(255,215,0,0.6)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, 35, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,215,0,0.8)';
+      ctx.font = 'bold 16px Arial';
+      ctx.fillText('已领取', 0, 0);
+    }
+    
+    ctx.restore();
+  }
+
+  collect() {
+    this.collected = true;
+    // 收集动画
+    let s = 1;
+    const animate = () => {
+      s += (0.85 - s) * 0.1;
+      this.scale = s;
+      if(Math.abs(s - 0.85) > 0.01) requestAnimationFrame(animate);
+    };
+    animate();
+  }
+}
+
+// ================= 游戏主逻辑 =================
+class Game {
+  constructor() {
+    this.bottles = [];
+    this.packets = [];
+    this.selectedIndex = null;
+    this.pouring = null;
+    this.isAnimating = false;
+    this.completedCount = 0;
+    
+    this.init();
+    this.loop();
+  }
+
+  init() {
+    // 红包位置（顶部，均匀分布）
+    const packetY = 150;
+    const spacing = 720 / 4;
+    COLORS.forEach((color, idx) => {
+      this.packets.push(new RedPacket(spacing * (idx + 1), packetY, color));
+    });
+    
+    // 瓶子位置（底部居中，横向排列）
+    const bottleY = 850;
+    const bottleW = 100;
+    const gap = 40;
+    const totalW = 4 * bottleW + 3 * gap;
+    const startX = (720 - totalW) / 2;
+    
+    // 初始布局（有解的关卡）
+    const layouts = [
+      [COLORS[0], COLORS[1], COLORS[2], COLORS[0]], // 红蓝绿红
+      [COLORS[1], COLORS[2], COLORS[0], COLORS[1]], // 蓝绿红蓝
+      [COLORS[2], COLORS[0], COLORS[1], COLORS[2]], // 绿红蓝绿
+      [] // 空瓶
+    ];
+    
+    layouts.forEach((colors, idx) => {
+      this.bottles.push(new Bottle(
+        startX + idx * (bottleW + gap),
+        bottleY,
+        idx,
+        colors
+      ));
+    });
+    
+    // 点击事件（坐标需相对于canvas）
+    canvas.addEventListener('click', (e) => this.handleInput(e.offsetX, e.offsetY));
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = 720 / rect.width;
+      const scaleY = 1280 / rect.height;
+      this.handleInput(
+        (e.touches[0].clientX - rect.left) * scaleX,
+        (e.touches[0].clientY - rect.top) * scaleY
+      );
+    });
+  }
+
+  handleInput(x, y) {
+    if(this.isAnimating || this.pouring) return;
+    
+    // 检查点击瓶子
+    const idx = this.bottles.findIndex(b => b.contains(x, y));
+    if(idx === -1) return;
+    
+    const bottle = this.bottles[idx];
+    
+    if(this.selectedIndex === null) {
+      if(bottle.colors.length === 0) {
+        this.showHint('空瓶子不能选择', true);
+        return;
+      }
+      bottle.selected = true;
+      this.selectedIndex = idx;
+      this.showHint('再点击目标瓶子倒水');
+    } else if(this.selectedIndex === idx) {
+      bottle.selected = false;
+      this.selectedIndex = null;
+      this.showHint('点击瓶子选择，倒水到同色');
+    } else {
+      this.attemptPour(this.selectedIndex, idx);
+    }
+  }
+
+  attemptPour(fromIdx, toIdx) {
+    const from = this.bottles[fromIdx];
+    const to = this.bottles[toIdx];
+    
+    const fromColor = from.colors[from.colors.length - 1];
+    const toTop = to.colors[to.colors.length - 1];
+    
+    if(to.colors.length >= 4) {
+      this.showHint('目标瓶子已满', true);
+      return;
+    }
+    if(toTop && toTop.name !== fromColor.name) {
+      this.showHint('只能倒入相同颜色', true);
+      return;
+    }
+    
+    // 开始倒水动画
+    this.isAnimating = true;
+    from.selected = false;
+    this.selectedIndex = null;
+    
+    this.pouring = new PourAnimation(from, to, fromColor);
+    
+    // 延迟执行数据更新
+    setTimeout(() => {
+      to.colors.push(fromColor);
+      from.colors.pop();
+      
+      // 检查满瓶
+      if(to.colors.length === 4 && to.colors.every(c => c.name === fromColor.name)) {
+        to.corked = true;
+        setTimeout(() => this.collectBottle(to, fromColor), 600);
+      } else {
+        this.isAnimating = false;
+        this.pouring = null;
+        this.showHint('点击瓶子选择，倒水到同色');
+      }
+    }, 800);
+  }
+
+  collectBottle(bottle, color) {
+    const packet = this.packets.find(p => p.color.name === color.name && !p.collected);
+    if(packet) {
+      packet.collect();
+      this.completedCount++;
+      
+      // 瓶子飞入红包动画
+      const targetX = packet.x;
+      const targetY = packet.y;
+      
+      bottle.isFlying = true;
+      bottle.targetX = targetX;
+      bottle.targetY = targetY;
+      bottle.flyProgress = 0;
+      
+      setTimeout(() => {
+        this.isAnimating = false;
+        this.pouring = null;
+        if(this.completedCount >= 3) this.showWin();
+        else this.showHint('点击瓶子选择，倒水到同色');
+      }, 1000);
+    }
+  }
+
+  showWin() {
+    this.showHint('🎉 恭喜通关！所有红包已领取', false);
+    document.getElementById('cta').classList.add('show');
+    
+    // 撒花特效
+    this.createConfetti();
+  }
+
+  createConfetti() {
+    this.confetti = [];
+    for(let i=0; i<100; i++) {
+      this.confetti.push({
+        x: 360, y: 640,
+        vx: (Math.random()-0.5)*20,
+        vy: (Math.random()-0.5)*20 - 10,
+        color: COLORS[Math.floor(Math.random()*3)].main,
+        size: 5 + Math.random()*10,
+        rotation: Math.random()*360
+      });
+    }
+  }
+
+  showHint(text, isError = false) {
+    const hint = document.getElementById('hint');
+    hint.textContent = text;
+    hint.className = isError ? 'hint-box error' : 'hint-box';
+  }
+
+  loop() {
+    ctx.clearRect(0, 0, width, height);
+    
+    // 绘制背景装饰（星星点点）
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    for(let i=0; i<20; i++) {
+      const x = (i * 137) % 720;
+      const y = (i * 73) % 600;
+      ctx.beginPath();
+      ctx.arc(x, y, 1 + (i%3), 0, Math.PI*2);
+      ctx.fill();
+    }
+    
+    // 绘制红包
+    this.packets.forEach(p => p.draw(ctx));
+    
+    // 绘制倒流动画
+    if(this.pouring) {
+      this.pouring.update();
+      this.pouring.draw(ctx);
+    }
+    
+    // 绘制瓶子
+    this.bottles.forEach(bottle => {
+      if(bottle.isFlying) {
+        // 飞行动画
+        bottle.flyProgress += 0.05;
+        const t = bottle.flyProgress;
+        bottle.x += (bottle.targetX - bottle.x) * 0.1;
+        bottle.y += (bottle.targetY - bottle.y) * 0.1;
+        bottle.scale = 1 - t * 0.5;
+        bottle.rotation = t * 720;
+        
+        ctx.save();
+        ctx.translate(bottle.x + bottle.width/2, bottle.y + bottle.height/2);
+        ctx.scale(bottle.scale, bottle.scale);
+        ctx.rotate(bottle.rotation * Math.PI/180);
+        ctx.translate(-bottle.width/2, -bottle.height/2);
+        bottle.draw(ctx);
+        ctx.restore();
+        
+        if(t >= 1) bottle.visible = false;
+      } else if(bottle.visible !== false) {
+        bottle.draw(ctx);
+      }
+    });
+    
+    // 绘制庆祝彩纸
+    if(this.confetti) {
+      this.confetti.forEach(c => {
+        c.x += c.vx;
+        c.y += c.vy;
+        c.vy += 0.5;
+        c.rotation += 5;
+        
+        ctx.save();
+        ctx.translate(c.x, c.y);
+        ctx.rotate(c.rotation * Math.PI/180);
+        ctx.fillStyle = c.color;
+        ctx.fillRect(-c.size/2, -c.size/2, c.size, c.size);
+        ctx.restore();
+      });
+    }
+    
+    requestAnimationFrame(() => this.loop());
+  }
+}
+
+// 启动
+const game = new Game();
+
+// CTA跳转
+function download() {
+  alert('跳转到应用商店');
+  // window.location.href = '你的下载链接';
+}
+</script>
+</body>
+</html>
