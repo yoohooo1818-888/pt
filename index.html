@@ -143,4 +143,47 @@ function onBottleClick(index) {
     // 倒水逻辑（简化版）
     const from = bottles[selectedIndex];
     const to = bottle;
-    const color =
+    const color = from.colors[from.colors.length-1];
+    
+    if(to.colors.length >= 4) {
+      document.getElementById('hint').textContent = '瓶子满了！';
+      return;
+    }
+    
+    // 移动颜色
+    from.colors.pop();
+    to.colors.push(color);
+    
+    // 更新视觉
+    updateBottle(selectedIndex);
+    updateBottle(index);
+    
+    from.element.classList.remove('selected');
+    selectedIndex = null;
+    document.getElementById('hint').textContent = '点击瓶子开始游戏';
+  }
+}
+
+function updateBottle(index) {
+  const b = bottles[index];
+  const liquid = b.element.querySelector(`#liquid-${index}`);
+  liquid.innerHTML = '';
+  b.colors.forEach(c => {
+    const l = document.createElement('div');
+    l.className = 'liquid-layer';
+    l.style.backgroundColor = c.hex;
+    liquid.appendChild(l);
+  });
+  
+  // 满瓶判定
+  if(b.colors.length === 4 && b.colors.every(c => c.name === b.colors[0].name)) {
+    b.element.classList.add('corked');
+  } else {
+    b.element.classList.remove('corked');
+  }
+}
+
+init();
+</script>
+</body>
+</html>
