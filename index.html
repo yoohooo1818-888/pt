@@ -2,410 +2,384 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
-<title>倒水红包版</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>倒水游戏 - 自适应版</title>
 <style>
-* { margin:0; padding:0; box-sizing:border-box; touch-action:none; -webkit-tap-highlight-color:transparent; user-select:none; }
-body { 
-  width:100%; height:100vh; overflow:hidden;
-  background:#0a1628;
-  display:flex; justify-content:center; align-items:center;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+* { margin:0; padding:0; box-sizing:border-box; touch-action:none; -webkit-tap-highlight-color:transparent; user-select:none; overflow:hidden; }
+html, body { width:100%; height:100%; background:#0a1628; }
+#gameCanvas { display:block; width:100%; height:100%; }
+.hint { 
+  position:fixed; top:15%; left:50%; transform:translateX(-50%);
+  background:rgba(0,0,0,0.7); color:#fff; padding:12px 30px; border-radius:25px;
+  font-size:16px; pointer-events:none; z-index:100; white-space:nowrap;
+  border:1px solid rgba(255,255,255,0.2);
 }
-
-/* 游戏容器 - 固定720x1280，居中显示 */
-#gameContainer {
-  width:720px; height:1280px;
-  position:relative;
-  background: radial-gradient(ellipse at center top, #1e3a5f 0%, #0a1628 60%, #050d18 100%);
-  overflow:hidden;
-  box-shadow:0 0 50px rgba(0,0,0,0.8);
-}
-
-/* 适配移动端全面屏 */
-@media (max-width:720px) {
-  #gameContainer { width:100vw; height:100vh; }
-}
-
-canvas { display:block; }
-
-/* UI层 */
-.ui-layer { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:100; }
-.hint-box {
-  position:absolute; top:200px; left:50%; transform:translateX(-50%);
-  background:rgba(0,0,0,0.6); backdrop-filter:blur(10px);
-  padding:20px 40px; border-radius:40px; border:1px solid rgba(255,255,255,0.2);
-  color:#fff; font-size:28px; text-align:center; white-space:nowrap;
-  transition:all 0.3s; pointer-events:auto;
-}
-.hint-box.error { color:#ff6b6b; border-color:#ff6b6b; animation:shake 0.4s; }
-@keyframes shake { 0%,100%{transform:translateX(-50%) rotate(0);} 25%{transform:translateX(-50%) rotate(-3deg);} 75%{transform:translateX(-50%) rotate(3deg);} }
-
-/* CTA按钮 */
-.cta-btn {
-  position:absolute; bottom:100px; left:50%; transform:translateX(-50%);
-  background:linear-gradient(135deg, #ff6b6b, #ee5a6f); color:white;
-  font-size:32px; font-weight:bold; padding:25px 80px; border-radius:50px;
-  border:none; cursor:pointer; pointer-events:auto;
-  box-shadow:0 10px 40px rgba(238,90,111,0.4);
-  animation:pulse 2s infinite; display:none;
+.hint.error { color:#ff6b6b; border-color:#ff6b6b; animation:shake 0.5s; }
+@keyframes shake { 0%,100%{transform:translateX(-50%) translateX(0);} 25%{transform:translateX(-50%) translateX(-10px);} 75%{transform:translateX(-50%) translateX(10px);} }
+.cta { 
+  position:fixed; bottom:5%; left:50%; transform:translateX(-50%);
+  background:linear-gradient(135deg,#ff6b6b,#ee5a6f); color:white;
+  padding:18px 50px; border-radius:30px; font-size:18px; font-weight:bold;
+  border:none; display:none; box-shadow:0 5px 20px rgba(238,90,111,0.4);
+  animation:pulse 2s infinite;
 }
 @keyframes pulse { 0%,100%{transform:translateX(-50%) scale(1);} 50%{transform:translateX(-50%) scale(1.05);} }
-.cta-btn.show { display:block; }
+.cta.show { display:block; }
 </style>
 </head>
 <body>
-
-<div id="gameContainer">
-  <canvas id="gameCanvas" width="720" height="1280"></canvas>
-  <div class="ui-layer">
-    <div class="hint-box" id="hint">点击瓶子选择，倒水到同色</div>
-    <button class="cta-btn" id="cta" onclick="download()">🧧 领红包下载</button>
-  </div>
-</div>
+<canvas id="gameCanvas"></canvas>
+<div class="hint" id="hint">点击瓶子选择，倒水到同色瓶</div>
+<button class="cta" id="cta" onclick="download()">🧧 领红包下载</button>
 
 <script>
+// 响应式画布设置
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-const width = 720, height = 1280;
+let width, height, scale;
 
-// 颜色配置（更鲜艳的配色）
+function resize() {
+  width = canvas.width = window.innerWidth * window.devicePixelRatio;
+  height = canvas.height = window.innerHeight * window.devicePixelRatio;
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  scale = width < height ? width / 375 : height / 812; // 以iPhone X为基准
+}
+window.addEventListener('resize', resize);
+resize();
+
+// 颜色配置
 const COLORS = [
-  { name:'red', main:'#ff4757', light:'#ff6b81', dark:'#c44569', glow:'rgba(255,71,87,0.6)' },
-  { name:'blue', main:'#3742fa', light:'#5352ed', dark:'#2f3542', glow:'rgba(55,66,250,0.6)' },
-  { name:'green', main:'#2ed573', light:'#7bed9f', dark:'#218c74', glow:'rgba(46,213,115,0.6)' }
+  { name:'red', main:'#FF4757', light:'#FF6B81', dark:'#C44569', glow:'rgba(255,71,87,0.6)' },
+  { name:'blue', main:'#3742FA', light:'#5352ED', dark:'#2F3542', glow:'rgba(55,66,250,0.6)' },
+  { name:'green', main:'#2ED573', light:'#7BED9F', dark:'#218C74', glow:'rgba(46,213,115,0.6)' }
 ];
 
-// 工具函数：绘制圆角矩形
-function drawRoundRect(ctx, x, y, w, h, r) {
+// 状态
+let bottles = [];
+let packets = [];
+let selectedIdx = null;
+let pouringAnim = null;
+let particles = [];
+let isAnimating = false;
+
+// 绘制圆角矩形工具
+function roundRect(ctx, x, y, w, h, r) {
+  const rr = Math.min(r, w/2, h/2);
   ctx.beginPath();
-  ctx.moveTo(x+r, y);
-  ctx.lineTo(x+w-r, y); ctx.arcTo(x+w, y, x+w, y+r, r);
-  ctx.lineTo(x+w, y+h-r); ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
-  ctx.lineTo(x+r, y+h); ctx.arcTo(x, y+h, x, y+h-r, r);
-  ctx.lineTo(x, y+r); ctx.arcTo(x, y, x+r, y, r);
+  ctx.moveTo(x+rr, y);
+  ctx.lineTo(x+w-rr, y);
+  ctx.quadraticCurveTo(x+w, y, x+w, y+rr);
+  ctx.lineTo(x+w, y+h-rr);
+  ctx.quadraticCurveTo(x+w, y+h, x+w-rr, y+h);
+  ctx.lineTo(x+rr, y+h);
+  ctx.quadraticCurveTo(x, y+h, x, y+h-rr);
+  ctx.lineTo(x, y+rr);
+  ctx.quadraticCurveTo(x, y, x+rr, y);
   ctx.closePath();
 }
 
-// ================= 瓶子类（精修版） =================
+// 瓶子类 - 精致玻璃瓶样式
 class Bottle {
-  constructor(x, y, id, colors = []) {
-    this.x = x; this.y = y; this.id = id;
-    this.width = 100; this.height = 220;
-    this.colors = colors; // 从底到上
+  constructor(x, y, w, h, colors) {
+    this.x = x; this.y = y; this.w = w; this.h = h;
+    this.colors = colors || []; // 从底到顶
     this.selected = false;
     this.corked = false;
-    this.liquidY = 0; // 液面波动偏移
-    this.targetLiquidY = 0;
+    this.flying = false;
+    this.flyProgress = 0;
+    this.targetX = 0; this.targetY = 0;
   }
 
   draw(ctx) {
-    const { x, y, w, h } = { x:this.x, y:this.y, w:this.width, h:this.height };
-    const cx = x + w/2;
-    
-    // 先绘制液体（在玻璃后面）
-    this.drawLiquid(ctx);
-    
-    // 绘制玻璃瓶身（透明效果）
-    ctx.save();
-    
-    // 瓶身外轮廓（用于裁剪和描边）
-    drawRoundRect(ctx, x, y, w, h, 15);
-    
-    // 玻璃瓶填充（极淡的青色透明）
-    ctx.fillStyle = 'rgba(200,230,255,0.08)';
-    ctx.fill();
-    
-    // 玻璃边框（内发光效果）
-    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    
-    // 选中状态外发光
-    if(this.selected) {
-      ctx.shadowBlur = 30;
-      ctx.shadowColor = 'rgba(255,215,0,0.8)';
-      ctx.strokeStyle = '#ffd700';
-      ctx.lineWidth = 4;
-      ctx.stroke();
-      ctx.shadowBlur = 0;
+    if (this.flying) {
+      // 飞行动画
+      this.flyProgress += 0.05;
+      const t = this.flyProgress;
+      const curX = this.x + (this.targetX - this.x) * t;
+      const curY = this.y + (this.targetY - this.y) * t - Math.sin(t*Math.PI) * 100; // 抛物线
+      const s = 1 - t * 0.3;
+      
+      ctx.save();
+      ctx.translate(curX + this.w/2, curY + this.h/2);
+      ctx.scale(s, s);
+      ctx.rotate(t * Math.PI * 2);
+      this.drawShape(ctx, -this.w/2, -this.h/2, this.w, this.h);
+      ctx.restore();
+      return;
     }
-    
-    // 左侧高光（玻璃反光）
-    ctx.beginPath();
-    ctx.moveTo(x+15, y+30);
-    ctx.lineTo(x+15, y+h-40);
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-    ctx.lineCap = 'round';
-    ctx.stroke();
-    
-    // 右侧次高光
-    ctx.beginPath();
-    ctx.moveTo(x+w-12, y+40);
-    ctx.lineTo(x+w-12, y+h-50);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-    ctx.stroke();
-    
-    // 瓶口边缘
-    ctx.beginPath();
-    ctx.ellipse(cx, y+8, 35, 10, 0, 0, Math.PI*2);
-    ctx.fillStyle = 'rgba(200,230,255,0.15)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    
-    ctx.restore();
-    
-    // 绘制软木塞（如果满瓶）
-    if(this.corked || (this.colors.length === 4 && this.isUniform())) {
-      this.drawCork(ctx);
-    }
+
+    this.drawShape(ctx, this.x, this.y, this.w, this.h);
   }
 
-  drawLiquid(ctx) {
-    if(this.colors.length === 0) return;
+  drawShape(ctx, x, y, w, h) {
+    const cx = x + w/2;
+    const bw = w * 0.7; // 瓶身宽度（细瓶口）
     
-    const { x, y, width:w, height:h } = this;
-    const liquidHeight = (h - 40) / 4; // 每层高度
-    const bottomY = y + h - 20; // 液体底部
-    
-    // 更新液面波动
-    this.liquidY += (this.targetLiquidY - this.liquidY) * 0.1;
-    
+    // 裁剪区域（瓶内）- 绘制液体
     ctx.save();
+    this.clipBottle(ctx, x, y, w, h);
     
-    // 裁剪到瓶身内部
-    drawRoundRect(ctx, x+5, y+20, w-10, h-30, 10);
-    ctx.clip();
+    // 液体层（从下往上）
+    const liquidH = (h * 0.75) / 4; // 4层液体高度
+    const bottomY = y + h * 0.85;
     
-    // 绘制每一层液体
-    this.colors.forEach((color, idx) => {
-      const baseY = bottomY - (idx + 1) * liquidHeight;
-      const waveHeight = Math.sin(Date.now() * 0.003 + idx * 0.5) * 3; // 波动
+    this.colors.forEach((col, idx) => {
+      const ly = bottomY - (idx + 1) * liquidH;
       
       // 液体渐变
-      const grad = ctx.createLinearGradient(x, baseY, x, baseY + liquidHeight);
-      grad.addColorStop(0, color.dark);
-      grad.addColorStop(0.3, color.main);
-      grad.addColorStop(1, color.light);
+      const grad = ctx.createLinearGradient(x, ly, x, ly + liquidH);
+      grad.addColorStop(0, col.dark);
+      grad.addColorStop(0.5, col.main);
+      grad.addColorStop(1, col.light);
       
       ctx.fillStyle = grad;
       
-      // 绘制液体块（带圆角和波浪顶面）
+      // 绘制液体（带圆角底部）
       ctx.beginPath();
-      ctx.moveTo(x+5, baseY + 5);
-      
-      // 顶面波浪（只有最顶层有波动）
-      if(idx === this.colors.length - 1) {
-        for(let i=0; i<=10; i++) {
-          const px = x + 5 + (w-10) * (i/10);
-          const py = baseY + Math.sin(i * 0.5 + Date.now() * 0.005) * 2;
-          ctx.lineTo(px, py);
-        }
+      if (idx === 0) {
+        // 最底层有圆底
+        roundRect(ctx, x + (w-bw)/2, ly, bw, liquidH + 10, 10);
       } else {
-        ctx.lineTo(x+w-5, baseY);
+        ctx.fillRect(x + (w-bw)/2, ly, bw, liquidH);
       }
-      
-      ctx.lineTo(x+w-5, baseY + liquidHeight);
-      ctx.lineTo(x+5, baseY + liquidHeight);
-      ctx.closePath();
       ctx.fill();
       
-      // 液体表面高光（那层亮线）
+      // 液面高光（白色横线）
       ctx.fillStyle = 'rgba(255,255,255,0.4)';
-      ctx.beginPath();
-      if(idx === this.colors.length - 1) {
-        for(let i=0; i<=10; i++) {
-          const px = x + 5 + (w-10) * (i/10);
-          const py = baseY + Math.sin(i * 0.5 + Date.now() * 0.005) * 2;
-          ctx.lineTo(px, py + 3);
-        }
-      } else {
-        ctx.moveTo(x+5, baseY + 3);
-        ctx.lineTo(x+w-5, baseY + 3);
-      }
-      ctx.lineTo(x+w-5, baseY + 6);
-      ctx.lineTo(x+5, baseY + 6);
-      ctx.fill();
+      ctx.fillRect(x + (w-bw)/2 + 5, ly, bw - 10, 2);
       
-      // 层间分界线（淡淡的阴影）
-      if(idx > 0) {
+      // 层间阴影
+      if (idx > 0) {
         ctx.fillStyle = 'rgba(0,0,0,0.2)';
-        ctx.fillRect(x+5, baseY + liquidHeight - 2, w-10, 2);
+        ctx.fillRect(x + (w-bw)/2, ly + liquidH - 2, bw, 2);
       }
     });
+    ctx.restore();
+    
+    // 绘制玻璃外壳
+    this.drawGlassShell(ctx, x, y, w, h);
+    
+    // 软木塞（满瓶显示）
+    if (this.colors.length === 4 && this.isUniform()) {
+      this.drawCork(ctx, cx, y + h * 0.12, w * 0.5);
+    }
+  }
+
+  clipBottle(ctx, x, y, w, h) {
+    ctx.beginPath();
+    this.bottlePath(ctx, x, y, w, h);
+    ctx.clip();
+  }
+
+  bottlePath(ctx, x, y, w, h) {
+    const cx = x + w/2;
+    const neckW = w * 0.4;
+    const neckH = h * 0.2;
+    const bodyW = w * 0.75;
+    const bodyH = h * 0.65;
+    const shoulderH = h * 0.15;
+    
+    // 瓶口
+    ctx.moveTo(cx - neckW/2, y);
+    ctx.lineTo(cx + neckW/2, y);
+    // 瓶肩（过渡到瓶身）
+    ctx.lineTo(cx + bodyW/2, y + neckH);
+    ctx.lineTo(cx + bodyW/2, y + neckH + bodyH - 15);
+    // 瓶底（圆角）
+    ctx.quadraticCurveTo(cx + bodyW/2, y + h, cx, y + h);
+    ctx.quadraticCurveTo(cx - bodyW/2, y + h, cx - bodyW/2, y + neckH + bodyH - 15);
+    ctx.lineTo(cx - bodyW/2, y + neckH);
+    ctx.closePath();
+  }
+
+  drawGlassShell(ctx, x, y, w, h) {
+    ctx.save();
+    
+    // 玻璃边框（发光）
+    ctx.beginPath();
+    this.bottlePath(ctx, x, y, w, h);
+    ctx.strokeStyle = this.selected ? '#FFD700' : 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = this.selected ? 3 : 2;
+    ctx.shadowBlur = this.selected ? 20 : 10;
+    ctx.shadowColor = this.selected ? 'rgba(255,215,0,0.8)' : 'rgba(100,200,255,0.3)';
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    
+    // 玻璃填充（极淡）
+    ctx.fillStyle = 'rgba(200,230,255,0.05)';
+    ctx.fill();
+    
+    // 高光（左侧）
+    ctx.beginPath();
+    const cx = x + w/2;
+    ctx.moveTo(cx - w*0.15, y + h*0.1);
+    ctx.lineTo(cx - w*0.15, y + h*0.8);
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    
+    // 次高光
+    ctx.beginPath();
+    ctx.moveTo(cx + w*0.1, y + h*0.15);
+    ctx.lineTo(cx + w*0.1, y + h*0.5);
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
     
     ctx.restore();
   }
 
-  drawCork(ctx) {
-    const { x, y, width:w } = this;
-    const cx = x + w/2;
-    const cy = y - 5;
+  drawCork(ctx, x, y, w) {
+    const h = w * 0.6;
     
-    // 软木塞主体（圆角矩形）
-    const corkW = 50, corkH = 35;
-    
-    // 木纹渐变
-    const grad = ctx.createLinearGradient(cx-corkW/2, cy, cx+corkW/2, cy);
-    grad.addColorStop(0, '#d4a574');
-    grad.addColorStop(0.5, '#e6b88a');
-    grad.addColorStop(1, '#c4915c');
+    // 软木塞渐变
+    const grad = ctx.createLinearGradient(x - w/2, y, x + w/2, y);
+    grad.addColorStop(0, '#C4915C');
+    grad.addColorStop(0.5, '#E6B88A');
+    grad.addColorStop(1, '#C4915C');
     
     ctx.fillStyle = grad;
-    drawRoundRect(ctx, cx-corkW/2, cy, corkW, corkH, 8);
+    roundRect(ctx, x - w/2, y - h, w, h, 5);
     ctx.fill();
     
-    // 软木塞顶面（椭圆，有厚度感）
-    ctx.fillStyle = '#e6b88a';
+    // 顶部椭圆
+    ctx.fillStyle = '#D4A574';
     ctx.beginPath();
-    ctx.ellipse(cx, cy, corkW/2, 10, 0, 0, Math.PI*2);
+    ctx.ellipse(x, y - h, w/2, 5, 0, 0, Math.PI*2);
     ctx.fill();
-    ctx.strokeStyle = '#b8956a';
-    ctx.lineWidth = 1;
-    ctx.stroke();
     
-    // 木纹线条（纹理细节）
-    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+    // 纹理
+    ctx.strokeStyle = 'rgba(0,0,0,0.1)';
     ctx.lineWidth = 1;
-    for(let i=-15; i<=15; i+=8) {
+    for(let i=-w/3; i<=w/3; i+=w/6) {
       ctx.beginPath();
-      ctx.moveTo(cx+i, cy+5);
-      ctx.lineTo(cx+i+3, cy+corkH-5);
+      ctx.moveTo(x + i, y - h + 5);
+      ctx.lineTo(x + i + 3, y - 5);
       ctx.stroke();
     }
   }
 
   isUniform() {
-    if(this.colors.length === 0) return false;
+    if (this.colors.length === 0) return false;
     return this.colors.every(c => c.name === this.colors[0].name);
   }
 
   contains(mx, my) {
-    return mx > this.x && mx < this.x + this.width &&
-           my > this.y && my < this.y + this.height;
+    // 简化为矩形检测
+    return mx > this.x && mx < this.x + this.w &&
+           my > this.y && my < this.y + this.h;
+  }
+
+  flyTo(targetX, targetY) {
+    this.flying = true;
+    this.targetX = targetX;
+    this.targetY = targetY;
   }
 }
 
-// ================= 倒水动画类（精修版） =================
-class PourAnimation {
+// 倒水动画 - 真实物理抛物线
+class PourWater {
   constructor(fromBottle, toBottle, color) {
     this.from = fromBottle;
     this.to = toBottle;
     this.color = color;
     this.progress = 0;
-    this.particles = [];
+    this.droplets = [];
     this.active = true;
     
-    // 计算坐标
-    this.x1 = fromBottle.x + fromBottle.width/2;
-    this.y1 = fromBottle.y + 15;
-    this.x2 = toBottle.x + toBottle.width/2;
-    this.y2 = toBottle.y + 15;
+    // 计算瓶口坐标
+    this.x1 = fromBottle.x + fromBottle.w/2;
+    this.y1 = fromBottle.y + fromBottle.h * 0.15; // 瓶口位置
+    this.x2 = toBottle.x + toBottle.w/2;
+    this.y2 = toBottle.y + toBottle.h * 0.15;
+    
+    // 抛物线控制点（重力效果）
+    this.cpX = (this.x1 + this.x2) / 2;
+    this.cpY = Math.max(this.y1, this.y2) + Math.abs(this.x2 - this.x1) * 0.3;
   }
 
   update() {
     this.progress += 0.025;
     
-    // 生成水滴粒子
-    if(this.progress < 0.8 && Math.random() > 0.4) {
-      const t = this.progress;
-      // 贝塞尔曲线插值
-      const cpX = (this.x1 + this.x2) / 2;
-      const cpY = Math.max(this.y1, this.y2) + 80;
-      const x = (1-t)*(1-t)*this.x1 + 2*(1-t)*t*cpX + t*t*this.x2;
-      const y = (1-t)*(1-t)*this.y1 + 2*(1-t)*t*cpY + t*t*this.y2;
+    // 生成水滴（抛物线运动）
+    if (this.progress < 0.8 && Math.random() > 0.3) {
+      const t = this.progress + Math.random() * 0.1;
+      // 二次贝塞尔公式
+      const x = (1-t)*(1-t)*this.x1 + 2*(1-t)*t*this.cpX + t*t*this.x2;
+      const y = (1-t)*(1-t)*this.y1 + 2*(1-t)*t*this.cpY + t*t*this.y2;
       
-      this.particles.push({
-        x, y: y + Math.random()*20,
-        vx: (Math.random()-0.5)*2,
-        vy: Math.random()*5 + 2,
-        size: 4 + Math.random()*6,
-        life: 1,
-        color: this.color
+      this.droplets.push({
+        x, y, vx: (Math.random()-0.5)*2, vy: Math.random()*3,
+        size: 3 + Math.random()*4, life: 1
       });
     }
     
-    // 更新粒子
-    this.particles.forEach(p => {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.vy += 0.3; // 重力
-      p.life -= 0.03;
+    // 更新水滴
+    this.droplets.forEach(d => {
+      d.x += d.vx;
+      d.y += d.vy; // 重力下落
+      d.vy += 0.2;
+      d.life -= 0.02;
     });
-    this.particles = this.particles.filter(p => p.life > 0);
+    this.droplets = this.droplets.filter(d => d.life > 0 && d.y < this.y2 + 50);
     
-    if(this.progress >= 1 && this.particles.length === 0) {
+    if (this.progress >= 1 && this.droplets.length === 0) {
       this.active = false;
     }
   }
 
   draw(ctx) {
-    if(!this.active) return;
+    if (!this.active) return;
     
-    const { x1, y1, x2, y2, color } = this;
-    const progress = Math.min(this.progress, 1);
-    
-    // 主水流（粗）
+    // 抛物线水流（粗线）
     ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    const cpX = (x1 + x2) / 2;
-    const cpY = Math.max(y1, y2) + 100;
-    
-    // 绘制到当前进度位置
-    const t = progress;
-    const curX = (1-t)*(1-t)*x1 + 2*(1-t)*t*cpX + t*t*x2;
-    const curY = (1-t)*(1-t)*y1 + 2*(1-t)*t*cpY + t*t*y2;
-    
-    ctx.quadraticCurveTo(cpX, cpY, curX, curY);
-    ctx.strokeStyle = color.main;
-    ctx.lineWidth = 12;
+    ctx.moveTo(this.x1, this.y1);
+    ctx.quadraticCurveTo(this.cpX, this.cpY, this.x2, this.y2);
+    ctx.strokeStyle = this.color.main;
+    ctx.lineWidth = 8;
     ctx.lineCap = 'round';
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = color.glow;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = this.color.glow;
     ctx.stroke();
     ctx.shadowBlur = 0;
     
     // 水流核心（亮）
     ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.quadraticCurveTo(cpX, cpY, curX, curY);
-    ctx.strokeStyle = color.light;
-    ctx.lineWidth = 6;
+    ctx.moveTo(this.x1, this.y1);
+    ctx.quadraticCurveTo(this.cpX, this.cpY, this.x2, this.y2);
+    ctx.strokeStyle = this.color.light;
+    ctx.lineWidth = 4;
     ctx.stroke();
     
     // 水滴粒子
-    this.particles.forEach(p => {
+    this.droplets.forEach(d => {
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
-      ctx.fillStyle = p.color.main;
-      ctx.globalAlpha = p.life;
+      ctx.arc(d.x, d.y, d.size, 0, Math.PI*2);
+      ctx.fillStyle = this.color.light;
+      ctx.globalAlpha = d.life;
       ctx.fill();
       ctx.globalAlpha = 1;
     });
     
-    // 落入点涟漪
-    if(progress > 0.3 && progress < 0.9) {
+    // 落入涟漪
+    if (this.progress > 0.3 && this.progress < 0.9) {
       ctx.beginPath();
-      ctx.ellipse(x2, y2, 20*(1-progress), 8*(1-progress), 0, 0, Math.PI*2);
-      ctx.strokeStyle = color.main;
+      ctx.ellipse(this.x2, this.y2, 15*(1-this.progress), 5*(1-this.progress), 0, 0, Math.PI*2);
+      ctx.strokeStyle = this.color.main;
       ctx.lineWidth = 2;
       ctx.stroke();
     }
   }
 }
 
-// ================= 红包类 =================
+// 红包类
 class RedPacket {
   constructor(x, y, colorInfo) {
-    this.x = x; this.y = y;
-    this.color = colorInfo;
+    this.x = x; this.y = y; this.color = colorInfo;
     this.collected = false;
     this.scale = 1;
-    this.openProgress = 0;
   }
 
   draw(ctx) {
@@ -413,335 +387,288 @@ class RedPacket {
     ctx.translate(this.x, this.y);
     ctx.scale(this.scale, this.scale);
     
-    // 红包主体（圆角矩形）
-    const w = 90, h = 110;
+    const w = 70, h = 85;
     
-    // 如果是已收集状态，变灰
-    if(this.collected) {
-      ctx.filter = 'grayscale(0.8) brightness(0.7)';
-    } else {
-      // 等待状态的发光
-      ctx.shadowBlur = 20 + Math.sin(Date.now()*0.005)*10;
+    // 发光（未收集）
+    if (!this.collected) {
+      ctx.shadowBlur = 15 + Math.sin(Date.now()/200)*5;
       ctx.shadowColor = 'gold';
+    } else {
+      ctx.filter = 'grayscale(0.6)';
     }
     
-    // 红包红色渐变
+    // 红包主体
     const grad = ctx.createLinearGradient(0, -h/2, 0, h/2);
-    grad.addColorStop(0, '#ff6b6b');
-    grad.addColorStop(1, '#ee5a6f');
+    grad.addColorStop(0, '#FF6B6B');
+    grad.addColorStop(1, '#EE5A6F');
     ctx.fillStyle = grad;
-    drawRoundRect(ctx, -w/2, -h/2, w, h, 12);
+    roundRect(ctx, -w/2, -h/2, w, h, 8);
     ctx.fill();
     ctx.shadowBlur = 0;
     
-    // 上部盖子（稍深）
-    ctx.fillStyle = '#e54848';
+    // 盖子
+    ctx.fillStyle = '#E54848';
     ctx.beginPath();
     ctx.moveTo(-w/2, -h/2);
     ctx.lineTo(w/2, -h/2);
-    ctx.lineTo(w/2, -h/2 + 35);
-    ctx.bezierCurveTo(w/4, -h/2 + 25, -w/4, -h/2 + 25, -w/2, -h/2 + 35);
-    ctx.closePath();
+    ctx.lineTo(w/2, -h/2 + 25);
+    ctx.quadraticCurveTo(w/4, -h/2 + 20, 0, -h/2 + 25);
+    ctx.quadraticCurveTo(-w/4, -h/2 + 20, -w/2, -h/2 + 25);
     ctx.fill();
     
-    // 金色圆圈
-    ctx.fillStyle = '#ffd700';
+    // 金币
+    ctx.fillStyle = '#FFD700';
     ctx.beginPath();
-    ctx.arc(0, 5, 22, 0, Math.PI*2);
+    ctx.arc(0, 5, 16, 0, Math.PI*2);
     ctx.fill();
-    ctx.strokeStyle = '#ffb700';
+    ctx.strokeStyle = '#FFA500';
     ctx.lineWidth = 2;
     ctx.stroke();
     
-    // ¥符号
-    ctx.fillStyle = '#ee5a6f';
-    ctx.font = 'bold 24px Arial';
+    // ¥
+    ctx.fillStyle = '#EE5A6F';
+    ctx.font = 'bold 18px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('¥', 0, 5);
-    
-    // 已收集印章效果
-    if(this.collected) {
-      ctx.strokeStyle = 'rgba(255,215,0,0.6)';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.arc(0, 0, 35, 0, Math.PI*2);
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(255,215,0,0.8)';
-      ctx.font = 'bold 16px Arial';
-      ctx.fillText('已领取', 0, 0);
-    }
     
     ctx.restore();
   }
 
   collect() {
     this.collected = true;
-    // 收集动画
-    let s = 1;
+    // 缩放动画
     const animate = () => {
-      s += (0.85 - s) * 0.1;
-      this.scale = s;
-      if(Math.abs(s - 0.85) > 0.01) requestAnimationFrame(animate);
+      this.scale += (0.85 - this.scale) * 0.1;
+      if (Math.abs(this.scale - 0.85) > 0.01) requestAnimationFrame(animate);
     };
     animate();
+    
+    // 粒子爆发
+    for(let i=0; i<20; i++) {
+      const angle = (i/20) * Math.PI * 2;
+      const speed = 5 + Math.random()*5;
+      particles.push({
+        x: this.x, y: this.y,
+        vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed,
+        life: 1, color: '#FFD700', size: 4
+      });
+    }
   }
 }
 
-// ================= 游戏主逻辑 =================
-class Game {
-  constructor() {
-    this.bottles = [];
-    this.packets = [];
-    this.selectedIndex = null;
-    this.pouring = null;
-    this.isAnimating = false;
-    this.completedCount = 0;
-    
-    this.init();
-    this.loop();
-  }
+// 初始化游戏
+function init() {
+  bottles = [];
+  packets = [];
+  particles = [];
+  selectedIdx = null;
+  isAnimating = false;
+  
+  // 计算布局（基于屏幕尺寸）
+  const cx = width / 2;
+  const cy = height / 2;
+  
+  // 红包位置（顶部）
+  const pktY = height * 0.12;
+  const pktGap = Math.min(width * 0.25, 100);
+  COLORS.forEach((col, i) => {
+    packets.push(new RedPacket(cx + (i-1)*pktGap, pktY, col));
+  });
+  
+  // 瓶子布局（底部，响应式）
+  const bottleW = Math.min(width * 0.18, 80);
+  const bottleH = bottleW * 2.2;
+  const gap = width * 0.05;
+  const totalW = 4 * bottleW + 3 * gap;
+  const startX = (width - totalW) / 2;
+  const bottleY = height * 0.55;
+  
+  // 可解的初始布局（确保能通关）
+  // 瓶子1: [红,蓝] 瓶子2: [蓝,绿] 瓶子3: [绿,红] 瓶子4: []
+  const layouts = [
+    [COLORS[0], COLORS[1]], // 红-蓝
+    [COLORS[1], COLORS[2]], // 蓝-绿  
+    [COLORS[2], COLORS[0]], // 绿-红
+    [] // 空瓶
+  ];
+  
+  layouts.forEach((cols, i) => {
+    bottles.push(new Bottle(startX + i*(bottleW+gap), bottleY, bottleW, bottleH, cols));
+  });
+}
 
-  init() {
-    // 红包位置（顶部，均匀分布）
-    const packetY = 150;
-    const spacing = 720 / 4;
-    COLORS.forEach((color, idx) => {
-      this.packets.push(new RedPacket(spacing * (idx + 1), packetY, color));
-    });
-    
-    // 瓶子位置（底部居中，横向排列）
-    const bottleY = 850;
-    const bottleW = 100;
-    const gap = 40;
-    const totalW = 4 * bottleW + 3 * gap;
-    const startX = (720 - totalW) / 2;
-    
-    // 初始布局（有解的关卡）
-    const layouts = [
-      [COLORS[0], COLORS[1], COLORS[2], COLORS[0]], // 红蓝绿红
-      [COLORS[1], COLORS[2], COLORS[0], COLORS[1]], // 蓝绿红蓝
-      [COLORS[2], COLORS[0], COLORS[1], COLORS[2]], // 绿红蓝绿
-      [] // 空瓶
-    ];
-    
-    layouts.forEach((colors, idx) => {
-      this.bottles.push(new Bottle(
-        startX + idx * (bottleW + gap),
-        bottleY,
-        idx,
-        colors
-      ));
-    });
-    
-    // 点击事件（坐标需相对于canvas）
-    canvas.addEventListener('click', (e) => this.handleInput(e.offsetX, e.offsetY));
-    canvas.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = 720 / rect.width;
-      const scaleY = 1280 / rect.height;
-      this.handleInput(
-        (e.touches[0].clientX - rect.left) * scaleX,
-        (e.touches[0].clientY - rect.top) * scaleY
-      );
-    });
-  }
-
-  handleInput(x, y) {
-    if(this.isAnimating || this.pouring) return;
-    
-    // 检查点击瓶子
-    const idx = this.bottles.findIndex(b => b.contains(x, y));
-    if(idx === -1) return;
-    
-    const bottle = this.bottles[idx];
-    
-    if(this.selectedIndex === null) {
-      if(bottle.colors.length === 0) {
-        this.showHint('空瓶子不能选择', true);
-        return;
-      }
-      bottle.selected = true;
-      this.selectedIndex = idx;
-      this.showHint('再点击目标瓶子倒水');
-    } else if(this.selectedIndex === idx) {
-      bottle.selected = false;
-      this.selectedIndex = null;
-      this.showHint('点击瓶子选择，倒水到同色');
-    } else {
-      this.attemptPour(this.selectedIndex, idx);
-    }
-  }
-
-  attemptPour(fromIdx, toIdx) {
-    const from = this.bottles[fromIdx];
-    const to = this.bottles[toIdx];
-    
-    const fromColor = from.colors[from.colors.length - 1];
-    const toTop = to.colors[to.colors.length - 1];
-    
-    if(to.colors.length >= 4) {
-      this.showHint('目标瓶子已满', true);
+// 点击处理
+canvas.addEventListener('click', (e) => {
+  if (isAnimating || pouringAnim) return;
+  
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * window.devicePixelRatio;
+  const y = (e.clientY - rect.top) * window.devicePixelRatio;
+  
+  // 检查点击
+  const idx = bottles.findIndex(b => b.contains(x, y));
+  if (idx === -1) return;
+  
+  const bottle = bottles[idx];
+  
+  // 未选择时点击
+  if (selectedIdx === null) {
+    if (bottle.colors.length === 0) {
+      showHint('空瓶子不能选择', true);
       return;
     }
-    if(toTop && toTop.name !== fromColor.name) {
-      this.showHint('只能倒入相同颜色', true);
-      return;
-    }
-    
-    // 开始倒水动画
-    this.isAnimating = true;
-    from.selected = false;
-    this.selectedIndex = null;
-    
-    this.pouring = new PourAnimation(from, to, fromColor);
-    
-    // 延迟执行数据更新
-    setTimeout(() => {
-      to.colors.push(fromColor);
-      from.colors.pop();
-      
-      // 检查满瓶
-      if(to.colors.length === 4 && to.colors.every(c => c.name === fromColor.name)) {
-        to.corked = true;
-        setTimeout(() => this.collectBottle(to, fromColor), 600);
+    bottle.selected = true;
+    selectedIdx = idx;
+    showHint('再点击目标瓶子倒水');
+  }
+  // 取消选择
+  else if (selectedIdx === idx) {
+    bottle.selected = false;
+    selectedIdx = null;
+    showHint('点击瓶子选择，倒水到同色瓶');
+  }
+  // 倒水
+  else {
+    attemptPour(selectedIdx, idx);
+  }
+});
+
+function attemptPour(fromIdx, toIdx) {
+  const from = bottles[fromIdx];
+  const to = bottles[toIdx];
+  
+  // 检查规则
+  if (to.colors.length >= 4) {
+    showHint('目标瓶子已满', true);
+    return;
+  }
+  
+  const fromColor = from.colors[from.colors.length - 1];
+  const toColor = to.colors[to.colors.length - 1];
+  
+  if (toColor && toColor.name !== fromColor.name) {
+    showHint('颜色不匹配，只能倒到同色或空瓶', true);
+    return;
+  }
+  
+  // 开始动画
+  isAnimating = true;
+  from.selected = false;
+  selectedIdx = null;
+  
+  // 创建倒水动画
+  pouringAnim = new PourWater(from, to, fromColor);
+  
+  // 延迟执行逻辑
+  setTimeout(() => {
+    // 移动颜色（只移动顶部连续的同色块）
+    let count = 0;
+    const topColorName = fromColor.name;
+    for (let i = from.colors.length - 1; i >= 0; i--) {
+      if (from.colors[i].name === topColorName && to.colors.length < 4) {
+        to.colors.push(from.colors[i]);
+        from.colors.pop();
+        count++;
       } else {
-        this.isAnimating = false;
-        this.pouring = null;
-        this.showHint('点击瓶子选择，倒水到同色');
+        break;
       }
-    }, 800);
-  }
-
-  collectBottle(bottle, color) {
-    const packet = this.packets.find(p => p.color.name === color.name && !p.collected);
-    if(packet) {
-      packet.collect();
-      this.completedCount++;
-      
-      // 瓶子飞入红包动画
-      const targetX = packet.x;
-      const targetY = packet.y;
-      
-      bottle.isFlying = true;
-      bottle.targetX = targetX;
-      bottle.targetY = targetY;
-      bottle.flyProgress = 0;
-      
+    }
+    
+    // 检查满瓶
+    if (to.colors.length === 4 && to.colors.every(c => c.name === fromColor.name)) {
       setTimeout(() => {
-        this.isAnimating = false;
-        this.pouring = null;
-        if(this.completedCount >= 3) this.showWin();
-        else this.showHint('点击瓶子选择，倒水到同色');
-      }, 1000);
+        // 找到对应红包并收集
+        const packet = packets.find(p => p.color.name === fromColor.name && !p.collected);
+        if (packet) {
+          packet.collect();
+          to.flyTo(packet.x, packet.y);
+        }
+        checkWin();
+      }, 300);
     }
-  }
+    
+    isAnimating = false;
+    pouringAnim = null;
+    showHint('点击瓶子选择，倒水到同色瓶');
+  }, 800);
+}
 
-  showWin() {
-    this.showHint('🎉 恭喜通关！所有红包已领取', false);
+function showHint(text, isError) {
+  const hint = document.getElementById('hint');
+  hint.textContent = text;
+  hint.className = isError ? 'hint error' : 'hint';
+  if (isError) {
+    setTimeout(() => {
+      hint.textContent = '点击瓶子选择，倒水到同色瓶';
+      hint.className = 'hint';
+    }, 2000);
+  }
+}
+
+function checkWin() {
+  if (packets.every(p => p.collected)) {
+    showHint('🎉 恭喜通关！所有红包已领取');
     document.getElementById('cta').classList.add('show');
-    
-    // 撒花特效
-    this.createConfetti();
   }
+}
 
-  createConfetti() {
-    this.confetti = [];
-    for(let i=0; i<100; i++) {
-      this.confetti.push({
-        x: 360, y: 640,
-        vx: (Math.random()-0.5)*20,
-        vy: (Math.random()-0.5)*20 - 10,
-        color: COLORS[Math.floor(Math.random()*3)].main,
-        size: 5 + Math.random()*10,
-        rotation: Math.random()*360
-      });
-    }
-  }
+function download() {
+  alert('跳转到应用商店下载');
+}
 
-  showHint(text, isError = false) {
-    const hint = document.getElementById('hint');
-    hint.textContent = text;
-    hint.className = isError ? 'hint-box error' : 'hint-box';
+// 渲染循环
+function render() {
+  ctx.clearRect(0, 0, width, height);
+  
+  // 背景渐变
+  const grad = ctx.createLinearGradient(0, 0, 0, height);
+  grad.addColorStop(0, '#1a3a5f');
+  grad.addColorStop(1, '#0a1628');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, width, height);
+  
+  // 绘制倒水动画
+  if (pouringAnim) {
+    pouringAnim.update();
+    pouringAnim.draw(ctx);
   }
-
-  loop() {
-    ctx.clearRect(0, 0, width, height);
+  
+  // 绘制瓶子
+  bottles.forEach(b => b.draw(ctx));
+  
+  // 绘制红包
+  packets.forEach(p => p.draw(ctx));
+  
+  // 绘制粒子
+  particles.forEach((p, i) => {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.3; // 重力
+    p.life -= 0.02;
     
-    // 绘制背景装饰（星星点点）
-    ctx.fillStyle = 'rgba(255,255,255,0.1)';
-    for(let i=0; i<20; i++) {
-      const x = (i * 137) % 720;
-      const y = (i * 73) % 600;
-      ctx.beginPath();
-      ctx.arc(x, y, 1 + (i%3), 0, Math.PI*2);
-      ctx.fill();
-    }
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = p.life;
+    ctx.fill();
+    ctx.globalAlpha = 1;
     
-    // 绘制红包
-    this.packets.forEach(p => p.draw(ctx));
-    
-    // 绘制倒流动画
-    if(this.pouring) {
-      this.pouring.update();
-      this.pouring.draw(ctx);
-    }
-    
-    // 绘制瓶子
-    this.bottles.forEach(bottle => {
-      if(bottle.isFlying) {
-        // 飞行动画
-        bottle.flyProgress += 0.05;
-        const t = bottle.flyProgress;
-        bottle.x += (bottle.targetX - bottle.x) * 0.1;
-        bottle.y += (bottle.targetY - bottle.y) * 0.1;
-        bottle.scale = 1 - t * 0.5;
-        bottle.rotation = t * 720;
-        
-        ctx.save();
-        ctx.translate(bottle.x + bottle.width/2, bottle.y + bottle.height/2);
-        ctx.scale(bottle.scale, bottle.scale);
-        ctx.rotate(bottle.rotation * Math.PI/180);
-        ctx.translate(-bottle.width/2, -bottle.height/2);
-        bottle.draw(ctx);
-        ctx.restore();
-        
-        if(t >= 1) bottle.visible = false;
-      } else if(bottle.visible !== false) {
-        bottle.draw(ctx);
-      }
-    });
-    
-    // 绘制庆祝彩纸
-    if(this.confetti) {
-      this.confetti.forEach(c => {
-        c.x += c.vx;
-        c.y += c.vy;
-        c.vy += 0.5;
-        c.rotation += 5;
-        
-        ctx.save();
-        ctx.translate(c.x, c.y);
-        ctx.rotate(c.rotation * Math.PI/180);
-        ctx.fillStyle = c.color;
-        ctx.fillRect(-c.size/2, -c.size/2, c.size, c.size);
-        ctx.restore();
-      });
-    }
-    
-    requestAnimationFrame(() => this.loop());
-  }
+    if (p.life <= 0) particles.splice(i, 1);
+  });
+  
+  requestAnimationFrame(render);
 }
 
 // 启动
-const game = new Game();
+init();
+render();
 
-// CTA跳转
-function download() {
-  alert('跳转到应用商店');
-  // window.location.href = '你的下载链接';
-}
+// 窗口大小改变时重新布局
+window.addEventListener('resize', () => {
+  resize();
+  init(); // 重新布局
+});
 </script>
 </body>
 </html>
